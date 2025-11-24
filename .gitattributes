@@ -1,0 +1,1 @@
+data/clic_subset/*.png filter=lfs diff=lfs merge=lfs -text
