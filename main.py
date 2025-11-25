@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 import pandas as pd
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
+from tqdm import tqdm
+
 
 from src.wavelet_codec import wavelet_compress, wavelet_decompress, wavelet_save, wavelet_load
 from src.fractal_codec import fractal_encode, fractal_decode, fractal_save, fractal_load
@@ -68,13 +70,13 @@ def main(data_dirs, output_csv):
 
     for dataset_name, dataset_path in data_dirs.items():
         print(f"Processing dataset {dataset_name} from {dataset_path}")
-        for fname in os.listdir(dataset_path):
-            if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')):
-                image_path = os.path.join(dataset_path, fname)
-                metrics = process_image(image_path, results_dir, dataset_name)
-                metrics["dataset"] = dataset_name
-                collected_metrics.append(metrics)
-                print(f"Processed {fname}")
+        image_files = [fname for fname in os.listdir(dataset_path)
+                    if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'))]
+        for fname in tqdm(image_files, desc=f"{dataset_name} images", unit="img"):
+            image_path = os.path.join(dataset_path, fname)
+            metrics = process_image(image_path, results_dir, dataset_name)
+            metrics["dataset"] = dataset_name
+            collected_metrics.append(metrics)
 
     df = pd.DataFrame(collected_metrics)
     df.to_csv(output_csv, index=False)
