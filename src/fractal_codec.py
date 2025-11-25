@@ -1,60 +1,85 @@
-import pywt
 import numpy as np
 import cv2
-import os
+import pickle
 
-def wavelet_compress(img, wavelet='haar', level=3, quant_step=10):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    coeffs = pywt.wavedec2(gray, wavelet=wavelet, level=level)
+def downsample_block(block, factor=2):
+    return block.reshape((block.shape[0]//factor, factor, block.shape[1]//factor, factor)).mean(axis=(1,3))
 
-    coeffs_quant = []
-    for arr in coeffs:
-        if isinstance(arr, tuple):
-            quant_arr = tuple(np.round(c / quant_step).astype(np.int16) for c in arr)
-            coeffs_quant.append(quant_arr)
-        else:
-            quant_arr = np.round(arr / quant_step).astype(np.int16)
-            coeffs_quant.append(quant_arr)
-    return coeffs_quant
+def fractal_encode(img, range_size=8, domain_size=16):
+    height, width = img.shape
+    img = img.astype(np.float32) / 255.0
+    transformations = []  # list of (range_x, range_y, domain_x, domain_y, contrast, brightness, flip_angle)
 
-def wavelet_save(coeffs_quant, save_path):
-    to_save = {}
-    to_save['cA'] = coeffs_quant[0]
-    for i, detail_coeffs in enumerate(coeffs_quant[1:], start=1):
-        to_save[f'cH_{i}'], to_save[f'cV_{i}'], to_save[f'cD_{i}'] = detail_coeffs
-    np.savez_compressed(save_path, **to_save)
+    for i in range(0, height - range_size + 1, range_size):
+        for j in range(0, width - range_size + 1, range_size):
+            range_block = img[i:i+range_size, j:j+range_size]
+            min_err = float('inf')
+            best_params = None
 
-def wavelet_load(load_path):
-    data = np.load(load_path)
-    cA = data['cA']
-    coeffs = [cA]
-    i = 1
-    while f'cH_{i}' in data:
-        cH = data[f'cH_{i}']
-        cV = data[f'cV_{i}']
-        cD = data[f'cD_{i}']
-        coeffs.append((cH, cV, cD))
-        i += 1
-    return coeffs
+            for di in range(0, height - domain_size + 1, range_size//2):
+                for dj in range(0, width - domain_size + 1, range_size//2):
+                    domain_block = img[di:di+domain_size, dj:dj+domain_size]
+                    domain_ds = downsample_block(domain_block, factor=domain_size//range_size)
 
-def wavelet_decompress(coeffs_quant, wavelet='haar', quant_step=10):
-    coeffs_dequant = []
-    for arr in coeffs_quant:
-        if isinstance(arr, tuple):
-            dequant_arr = tuple((c.astype(np.float32) * quant_step) for c in arr)
-            coeffs_dequant.append(dequant_arr)
-        else:
-            dequant_arr = (arr.astype(np.float32) * quant_step)
-            coeffs_dequant.append(dequant_arr)
-    img_rec = pywt.waverec2(coeffs_dequant, wavelet=wavelet)
-    img_rec = np.clip(img_rec, 0, 255).astype(np.uint8)
-    return img_rec
+                    # Transform candidates: no flip/rot only for simplicity here; extend for full method
+                    candidate = domain_ds
+
+                    x = candidate.flatten()
+                    y = range_block.flatten()
+                    var_x = np.var(x)
+                    if var_x == 0:
+                        continue
+                    a = np.cov(x,y)[0,1] / var_x  # contrast
+                    b = np.mean(y) - a*np.mean(x) # brightness
+
+                    pred = a*x + b
+                    err = np.mean((y - pred)**2)
+
+                    if err < min_err:
+                        min_err = err
+                        best_params = (i, j, di, dj, a, b)
+
+            transformations.append(best_params)
+    return transformations
+
+def fractal_save(transformations, filename):
+    with open(filename, 'wb') as f:
+        pickle.dump(transformations, f)
+
+def fractal_load(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
+
+def fractal_decode(transformations, img_shape, range_size=8, domain_size=16, iterations=10):
+    height, width = img_shape
+    img = np.zeros(img_shape, dtype=np.float32)
+
+    for _ in range(iterations):
+        new_img = np.zeros_like(img)
+        counts = np.zeros_like(img)
+
+        for (ri, rj, di, dj, a, b) in transformations:
+            # get domain block and downsample
+            domain_block = img[di:di+domain_size, dj:dj+domain_size]
+            domain_ds = downsample_block(domain_block, factor=domain_size//range_size)
+
+            block_pred = a * domain_ds + b
+            block_pred = np.clip(block_pred, 0, 1)
+
+            new_img[ri:ri+range_size, rj:rj+range_size] += block_pred
+            counts[ri:ri+range_size, rj:rj+range_size] += 1
+
+        counts[counts==0] = 1
+        img = new_img / counts
+
+    img_uint8 = (img * 255).astype(np.uint8)
+    return img_uint8
 
 # Usage example
 if __name__ == "__main__":
-    img = cv2.imread('path/to/image.png')
-    coeffs_comp = wavelet_compress(img)
-    wavelet_save(coeffs_comp, 'compressed_img.npz')
-    loaded_coeffs = wavelet_load('compressed_img.npz')
-    reconstructed_img = wavelet_decompress(loaded_coeffs)
-    cv2.imwrite('reconstructed_wavelet.png', reconstructed_img)
+    img = cv2.imread('path/to/grayscale_image.png', cv2.IMREAD_GRAYSCALE)
+    trans = fractal_encode(img)
+    fractal_save(trans, 'fractal_params.pkl')
+    loaded_trans = fractal_load('fractal_params.pkl')
+    recon_img = fractal_decode(loaded_trans, img.shape, iterations=15)
+    cv2.imwrite('reconstructed_fractal.png', recon_img)
