@@ -6,10 +6,33 @@ from tqdm import tqdm
 def downsample_block(block, factor=2):
     return block.reshape((block.shape[0]//factor, factor, block.shape[1]//factor, factor)).mean(axis=(1,3))
 
+def classify_block(block, num_classes=3):
+    """
+    Classifies a block based on its variance.
+    Returns an integer representing the class.
+    """
+    variance = np.var(block)
+    # These thresholds are heuristic and can be tuned.
+    # They divide blocks into "flat", "medium", and "high" variance.
+    if variance < 0.01:
+        return 0  # Flat class
+    elif variance < 0.05:
+        return 1  # Medium variance class
+    else:
+        return 2  # High variance class
+
 def fractal_encode(img, range_size=8, domain_size=16, show_progress=True):
     height, width = img.shape
     img = img.astype(np.float32) / 255.0
     transformations = []  # list of (range_x, range_y, domain_x, domain_y, contrast, brightness, flip_angle)
+
+    # --- Pre-classify all possible domain blocks ---
+    domain_blocks_by_class = {i: [] for i in range(3)} # 3 classes for this example
+    for di in range(0, height - domain_size + 1, range_size//2):
+        for dj in range(0, width - domain_size + 1, range_size//2):
+            domain_block = img[di:di+domain_size, dj:dj+domain_size]
+            block_class = classify_block(domain_block)
+            domain_blocks_by_class[block_class].append((di, dj, domain_block))
 
     range_blocks_coords = [(i, j) for i in range(0, height - range_size + 1, range_size) for j in range(0, width - range_size + 1, range_size)]
     
@@ -19,9 +42,11 @@ def fractal_encode(img, range_size=8, domain_size=16, show_progress=True):
         min_err = float('inf')
         best_params_for_block = None
 
-        for di in range(0, height - domain_size + 1, range_size//2):
-            for dj in range(0, width - domain_size + 1, range_size//2):
-                domain_block = img[di:di+domain_size, dj:dj+domain_size]
+        # Determine the class of the current range block
+        range_block_class = classify_block(range_block)
+
+        # Only search within the corresponding class of domain blocks
+        for di, dj, domain_block in domain_blocks_by_class[range_block_class]:
                 domain_ds = downsample_block(domain_block, factor=domain_size//range_size)
 
                 # Transform candidates: no flip/rot only for simplicity here; extend for full method
