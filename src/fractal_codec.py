@@ -1,45 +1,49 @@
 import numpy as np
 import cv2
 import pickle
+from tqdm import tqdm
 
 def downsample_block(block, factor=2):
     return block.reshape((block.shape[0]//factor, factor, block.shape[1]//factor, factor)).mean(axis=(1,3))
 
-def fractal_encode(img, range_size=8, domain_size=16):
+def fractal_encode(img, range_size=8, domain_size=16, show_progress=True):
     height, width = img.shape
     img = img.astype(np.float32) / 255.0
     transformations = []  # list of (range_x, range_y, domain_x, domain_y, contrast, brightness, flip_angle)
 
-    for i in range(0, height - range_size + 1, range_size):
-        for j in range(0, width - range_size + 1, range_size):
-            range_block = img[i:i+range_size, j:j+range_size]
-            min_err = float('inf')
-            best_params = None
+    range_blocks_coords = [(i, j) for i in range(0, height - range_size + 1, range_size) for j in range(0, width - range_size + 1, range_size)]
+    
+    pbar = tqdm(range_blocks_coords, desc="Fractal Encoding", unit="block", disable=not show_progress, leave=False)
+    for i, j in pbar:
+        range_block = img[i:i+range_size, j:j+range_size]
+        min_err = float('inf')
+        best_params_for_block = None
 
-            for di in range(0, height - domain_size + 1, range_size//2):
-                for dj in range(0, width - domain_size + 1, range_size//2):
-                    domain_block = img[di:di+domain_size, dj:dj+domain_size]
-                    domain_ds = downsample_block(domain_block, factor=domain_size//range_size)
+        for di in range(0, height - domain_size + 1, range_size//2):
+            for dj in range(0, width - domain_size + 1, range_size//2):
+                domain_block = img[di:di+domain_size, dj:dj+domain_size]
+                domain_ds = downsample_block(domain_block, factor=domain_size//range_size)
 
-                    # Transform candidates: no flip/rot only for simplicity here; extend for full method
-                    candidate = domain_ds
+                # Transform candidates: no flip/rot only for simplicity here; extend for full method
+                candidate = domain_ds
 
-                    x = candidate.flatten()
-                    y = range_block.flatten()
-                    var_x = np.var(x)
-                    if var_x == 0:
-                        continue
-                    a = np.cov(x,y)[0,1] / var_x  # contrast
-                    b = np.mean(y) - a*np.mean(x) # brightness
+                x = candidate.flatten()
+                y = range_block.flatten()
+                var_x = np.var(x)
+                if var_x < 1e-6: # Use a small epsilon to avoid division by zero
+                    continue
+                a = np.cov(x,y)[0,1] / var_x  # contrast
+                b = np.mean(y) - a*np.mean(x) # brightness
 
-                    pred = a*x + b
-                    err = np.mean((y - pred)**2)
+                pred = a*candidate + b
+                err = np.mean((range_block - pred)**2)
 
-                    if err < min_err:
-                        min_err = err
-                        best_params = (i, j, di, dj, a, b)
+                if err < min_err:
+                    min_err = err
+                    best_params_for_block = (i, j, di, dj, a, b)
 
-            transformations.append(best_params)
+        if best_params_for_block:
+            transformations.append(best_params_for_block)
     return transformations
 
 def fractal_save(transformations, filename):

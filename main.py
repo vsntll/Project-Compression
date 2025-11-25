@@ -27,7 +27,7 @@ def process_image(image_path, results_dir, dataset_name):
     img_wavelet = wavelet_decompress(loaded_coeffs)
 
     # Fractal compression
-    fractal_params = fractal_encode(img_gray)
+    fractal_params = fractal_encode(img_gray, show_progress=False) # Set to True for detailed fractal progress
     fractal_file = os.path.join(results_dir, f"{image_name}_fractal.pkl")
     fractal_save(fractal_params, fractal_file)
     loaded_params = fractal_load(fractal_file)
@@ -72,7 +72,7 @@ def main(data_dirs, output_csv):
         print(f"Processing dataset {dataset_name} from {dataset_path}")
         image_files = [fname for fname in os.listdir(dataset_path)
                     if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'))]
-        for fname in tqdm(image_files, desc=f"{dataset_name} images", unit="img"):
+        for fname in tqdm(image_files, desc=f"Processing {dataset_name}", unit="image", leave=True):
             image_path = os.path.join(dataset_path, fname)
             metrics = process_image(image_path, results_dir, dataset_name)
             metrics["dataset"] = dataset_name
