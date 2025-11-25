@@ -1,0 +1,6 @@
+numpy
+pandas
+scikit-image
+tqdm
+opencv-python
+PyWavelets
