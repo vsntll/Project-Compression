@@ -9,53 +9,65 @@ def _downsample_block(block, factor=2):
     """Downsamples a block by an integer factor."""
     return block.reshape((block.shape[0]//factor, factor, block.shape[1]//factor, factor)).mean(axis=(1,3))
 
-def _classify_block(block, num_classes=3):
-    """Classifies a block based on its variance."""
-    variance = np.var(block)
-    if variance < 0.01:
-        return 0  # Flat class
-    elif variance < 0.05:
-        return 1  # Medium variance class
-    else:
-        return 2  # High variance class
-
 def _fractal_encode_internal(img, range_size, domain_size, show_progress):
     """Internal fractal encoding logic."""
     height, width = img.shape
     img_float = img.astype(np.float32) / 255.0
     transformations = []
 
-    domain_blocks_by_class = {i: [] for i in range(3)}
-    for di in range(0, height - domain_size + 1, range_size // 2):
-        for dj in range(0, width - domain_size + 1, range_size // 2):
-            domain_block = img_float[di:di+domain_size, dj:dj+domain_size]
-            block_class = _classify_block(domain_block)
-            domain_blocks_by_class[block_class].append((di, dj, domain_block))
+    # --- DFS Optimization: Create a grid of domain blocks for neighbor lookups ---
+    domain_stride = range_size // 2
+    domain_grid_h = (height - domain_size) // domain_stride + 1
+    domain_grid_w = (width - domain_size) // domain_stride + 1
+    domain_blocks = np.empty((domain_grid_h, domain_grid_w), dtype=object)
+
+    for i in range(domain_grid_h):
+        for j in range(domain_grid_w):
+            di, dj = i * domain_stride, j * domain_stride
+            domain_blocks[i, j] = (di, dj, img_float[di:di+domain_size, dj:dj+domain_size])
 
     range_blocks_coords = [(i, j) for i in range(0, height - range_size + 1, range_size) for j in range(0, width - range_size + 1, range_size)]
     
     pbar = tqdm(range_blocks_coords, desc="Fractal Encoding", unit="block", disable=not show_progress, leave=False)
-    for i, j in pbar:
-        range_block = img_float[i:i+range_size, j:j+range_size]
+    for ri, rj in pbar:
+        range_block = img_float[ri:ri+range_size, rj:rj+range_size]
         min_err = float('inf')
         best_params_for_block = None
-        range_block_class = _classify_block(range_block)
 
-        for di, dj, domain_block in domain_blocks_by_class[range_block_class]:
+        # --- DFS Search Implementation ---   as suggested by https://global-sci.com/index.php/jics/article/download/15769/31290/32520
+        stack = []
+        visited = set()
+
+        # Start search at the domain block in the same position as the range block
+        start_i, start_j = ri // domain_stride, rj // domain_stride
+        stack.append((start_i, start_j))
+        visited.add((start_i, start_j))
+
+        while stack:
+            curr_i, curr_j = stack.pop()
+
+            di, dj, domain_block = domain_blocks[curr_i, curr_j]
+            
+            # --- Perform the comparison ---
             domain_ds = _downsample_block(domain_block, factor=domain_size // range_size)
-            candidate = domain_ds
-            x = candidate.flatten()
-            y = range_block.flatten()
+            x, y = domain_ds.flatten(), range_block.flatten()
             var_x = np.var(x)
-            if var_x < 1e-6:
-                continue
-            a = np.cov(x, y)[0, 1] / var_x
-            b = np.mean(y) - a * np.mean(x)
-            pred = a * candidate + b
-            err = np.mean((range_block - pred)**2)
-            if err < min_err:
-                min_err = err
-                best_params_for_block = (i, j, di, dj, a, b)
+            if var_x > 1e-6:
+                a = np.cov(x, y)[0, 1] / var_x
+                b = np.mean(y) - a * np.mean(x)
+                pred = a * domain_ds + b
+                err = np.mean((range_block - pred)**2)
+
+                if err < min_err:
+                    min_err = err
+                    best_params_for_block = (ri, rj, di, dj, a, b)
+
+            # --- Add unvisited neighbors to the stack ---
+            for ni, nj in [(0, 1), (0, -1), (1, 0), (-1, 0)]: # Right, Left, Down, Up
+                next_i, next_j = curr_i + ni, curr_j + nj
+                if 0 <= next_i < domain_grid_h and 0 <= next_j < domain_grid_w and (next_i, next_j) not in visited:
+                    visited.add((next_i, next_j))
+                    stack.append((next_i, next_j))
 
         if best_params_for_block:
             transformations.append(best_params_for_block)

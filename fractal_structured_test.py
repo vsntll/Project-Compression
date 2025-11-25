@@ -4,6 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
+
 # Import from your new self-contained fractal codec
 from src.fractal_codec_structured import fractal_compress, fractal_decompress, fractal_save
 
@@ -19,7 +20,7 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
     """
     # --- Configuration ---
     base_results_dir = "results"
-    output_image_dir = os.path.join(base_results_dir, "fractal_structured")
+    output_image_dir = os.path.join(base_results_dir, "fractal_structured_dfs")
     metrics_dir = "results/metrics/"
 
     # --- Setup ---
@@ -90,4 +91,4 @@ if __name__ == "__main__":
         "standard_test": "data/standard_test",
         "clic_subset": "data/clic_subset"
     }
-    run_fractal_structured_test(data_dirs, "fractal_structured.csv")
+    run_fractal_structured_test(data_dirs, "fractal_structured_dfs.csv")
