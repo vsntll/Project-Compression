@@ -36,7 +36,7 @@ def _fractal_encode_internal(img, range_size, domain_size, show_progress, distor
 
     range_blocks_coords = [(i, j) for i in range(0, height - range_size + 1, range_size) for j in range(0, width - range_size + 1, range_size)]
     
-    pbar = tqdm(range_blocks_coords, desc=f"Worker {position}", unit="block", disable=not show_progress, leave=False, position=position)
+    pbar = tqdm(range_blocks_coords, desc=f"CPU Worker {position}", unit="block", disable=not show_progress, leave=False, position=position)
     for ri, rj in pbar:
         range_block = img_float[ri:ri+range_size, rj:rj+range_size]
         min_err = float('inf')
