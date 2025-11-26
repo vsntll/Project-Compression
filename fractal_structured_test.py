@@ -98,7 +98,7 @@ def process_image_cpu_task(args):
     reconstructed_img = fractal_decompress_cpu(compressed_data)
 
     # 5. Save the reconstructed image
-    output_path = os.path.join(dataset_output_dir, f"fractal_recon_{image_name}")
+    output_path = os.path.join(dataset_output_dir, f"fractal_recon_{os.path.splitext(image_name)[0]}_cpu.png")
     cv2.imwrite(output_path, reconstructed_img)
 
     # 6. Calculate and return metrics
@@ -165,37 +165,62 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
             print(f"Error: Input directory not found at '{dataset_path}'. Skipping.")
             continue
 
-        # --- Split tasks for CPU and GPU ---
-        # Dynamically split work based on the number of workers.
-        # This is a heuristic to balance the load, assuming GPU is much faster.
-        total_tasks = len(tasks)
-        split_index = min(total_tasks, int(total_tasks * (NUM_GPU_WORKERS / max_workers) * 5) if max_workers > 0 else 0)
-        gpu_tasks = tasks[:split_index] 
-        cpu_tasks = tasks[split_index:]
-
-        # --- Execute tasks for the current dataset in parallel ---
+        # --- Dynamic Task Execution for the current dataset ---
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = []
-            # Submit GPU tasks
-            if gpu_tasks:
-                gpu_tasks_with_ids = [(*task, (i % NUM_GPU_WORKERS)) for i, task in enumerate(gpu_tasks)]
-                futures.extend([executor.submit(process_image_gpu_task, task) for task in gpu_tasks_with_ids])
+            # Create iterators for task arguments and available worker IDs
+            task_iterator = iter(tasks)
             
-            # Submit CPU tasks
-            if cpu_tasks:
-                # Offset CPU worker IDs to avoid progress bar collision
-                cpu_tasks_with_ids = [(*task, (i % num_cpu_workers) + NUM_GPU_WORKERS) for i, task in enumerate(cpu_tasks)]
-                futures.extend([executor.submit(process_image_cpu_task, task) for task in cpu_tasks_with_ids])
+            # Map to track which future is running on which worker (and its type)
+            # Values will be tuples: (worker_id, 'gpu') or (worker_id, 'cpu')
+            future_to_worker = {}
+
+            # --- Initial task submission to fill all workers ---
+            # Prioritize GPU workers first
+            for worker_id in range(NUM_GPU_WORKERS):
+                try:
+                    task_args = next(task_iterator)
+                    future = executor.submit(process_image_gpu_task, (*task_args, worker_id))
+                    future_to_worker[future] = (worker_id, 'gpu')
+                except StopIteration:
+                    break # No more tasks
+            
+            # Then fill CPU workers
+            for worker_id in range(num_cpu_workers):
+                try:
+                    task_args = next(task_iterator)
+                    # Offset CPU worker IDs to avoid progress bar collision
+                    future = executor.submit(process_image_cpu_task, (*task_args, worker_id + NUM_GPU_WORKERS))
+                    future_to_worker[future] = (worker_id, 'cpu')
+                except StopIteration:
+                    break # No more tasks
 
             # Progress bar for images within the current dataset
             image_pbar = tqdm(total=len(tasks), desc=f"Images in {dataset_name}", unit="image", position=1, leave=False)
-            for future in as_completed(futures):
+            
+            # --- Process tasks as they complete and submit new ones ---
+            for future in as_completed(future_to_worker):
                 image_pbar.update(1)
                 try:
                     metrics = future.result()
                     collected_metrics.append(metrics)
                 except Exception as exc:
                     print(f'Task generated an exception: {exc}')
+
+                # A worker has finished. Get its ID and type.
+                worker_id, worker_type = future_to_worker.pop(future)
+
+                # Try to submit a new task to the now-free worker
+                try:
+                    task_args = next(task_iterator)
+                    if worker_type == 'gpu':
+                        new_future = executor.submit(process_image_gpu_task, (*task_args, worker_id))
+                        future_to_worker[new_future] = (worker_id, 'gpu')
+                    else: # worker_type == 'cpu'
+                        new_future = executor.submit(process_image_cpu_task, (*task_args, worker_id + NUM_GPU_WORKERS))
+                        future_to_worker[new_future] = (worker_id, 'cpu')
+                except StopIteration:
+                    # No more tasks left to submit
+                    pass
 
     # --- Save Metrics to CSV ---
     # Sort by dataset and image name for consistent output

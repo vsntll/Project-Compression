@@ -104,20 +104,31 @@ def fractal_compress_cuda(img, range_size=8, domain_size=16, show_progress=True,
     
     return transformations, img_gray.shape
 
+def _fractal_decode_gpu_internal(transformations, img_shape, range_size, domain_size, iterations):
+    """Internal fractal decoding logic accelerated on the GPU with CuPy."""
+    height, width = img_shape
+    # Start with a black image on the GPU
+    img_gpu = cp.zeros(img_shape, dtype=cp.float32)
+
+    for _ in range(iterations):
+        new_img_gpu = cp.zeros_like(img_gpu)
+        for (ri, rj, di, dj, a, b) in transformations:
+            domain_block = img_gpu[di:di+domain_size, dj:dj+domain_size]
+            domain_ds = _downsample_block_gpu(domain_block, factor=domain_size // range_size)
+            
+            # Apply transformation and clip on GPU
+            block_pred = cp.clip(a * domain_ds + b, 0, 1)
+            new_img_gpu[ri:ri+range_size, rj:rj+range_size] = block_pred
+        img_gpu = new_img_gpu
+
+    # Convert final image back to CPU memory as a uint8 array
+    return (img_gpu * 255).get().astype('uint8')
+
 def fractal_decompress_cuda(compressed_data, iterations=10):
-    """
-    Decompresses fractal-encoded data on the GPU. The original CPU-based `fractal_decompress` 
-    from `fractal_codec_structured.py` is already fast, but a GPU version is provided for completeness.
-    """
     transformations, img_shape = compressed_data
-    # Assuming default range/domain sizes if not provided from compressed_data
-    range_size = 8 
+    range_size = 8
     domain_size = 16
-    
-    # Use the CPU-based decoder from the other file, as it's fast enough.
-    # For a full GPU pipeline, you would rewrite _fractal_decode_internal using CuPy.
-    from fractal_codec_structured import _fractal_decode_internal
-    return _fractal_decode_internal(transformations, img_shape, range_size, domain_size, iterations)
+    return _fractal_decode_gpu_internal(transformations, img_shape, range_size, domain_size, iterations)
 
 def fractal_save(data, filename):
     """Saves compressed data (transformations, shape) to a file using pickle."""
