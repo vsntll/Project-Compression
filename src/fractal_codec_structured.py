@@ -9,7 +9,7 @@ def _downsample_block(block, factor=2):
     """Downsamples a block by an integer factor."""
     return block.reshape((block.shape[0]//factor, factor, block.shape[1]//factor, factor)).mean(axis=(1,3))
 
-def _fractal_encode_internal(img, range_size, domain_size, show_progress):
+def _fractal_encode_internal(img, range_size, domain_size, show_progress, distortion_threshold, max_dfs_visits):
     """Internal fractal encoding logic."""
     height, width = img.shape
     img_float = img.astype(np.float32) / 255.0
@@ -39,11 +39,22 @@ def _fractal_encode_internal(img, range_size, domain_size, show_progress):
         visited = set()
 
         # Start search at the domain block in the same position as the range block
-        start_i, start_j = ri // domain_stride, rj // domain_stride
+        # --- FIX: Clamp start indices to be within the bounds of the domain grid ---
+        start_i = min(ri // domain_stride, domain_grid_h - 1)
+        start_j = min(rj // domain_stride, domain_grid_w - 1)
+
         stack.append((start_i, start_j))
         visited.add((start_i, start_j))
 
+        # --- SPEEDUP OPTIMIZATION: Limit the number of nodes visited in DFS ---
+        visited_count = 0
+
         while stack:
+            # Hard stop to prevent excessively long searches for a single block
+            if visited_count >= max_dfs_visits:
+                break
+            visited_count += 1
+
             curr_i, curr_j = stack.pop()
 
             di, dj, domain_block = domain_blocks[curr_i, curr_j]
@@ -61,6 +72,10 @@ def _fractal_encode_internal(img, range_size, domain_size, show_progress):
                 if err < min_err:
                     min_err = err
                     best_params_for_block = (ri, rj, di, dj, a, b)
+                    
+                    # --- SPEEDUP OPTIMIZATION: Early exit if a good enough match is found ---
+                    if min_err < distortion_threshold:
+                        break # Exit the while loop immediately
 
             # --- Add unvisited neighbors to the stack ---
             for ni, nj in [(0, 1), (0, -1), (1, 0), (-1, 0)]: # Right, Left, Down, Up
@@ -68,6 +83,10 @@ def _fractal_encode_internal(img, range_size, domain_size, show_progress):
                 if 0 <= next_i < domain_grid_h and 0 <= next_j < domain_grid_w and (next_i, next_j) not in visited:
                     visited.add((next_i, next_j))
                     stack.append((next_i, next_j))
+            
+            # Check if the inner loop (comparison part) triggered an early exit
+            if min_err < distortion_threshold:
+                break
 
         if best_params_for_block:
             transformations.append(best_params_for_block)
@@ -88,7 +107,7 @@ def _fractal_decode_internal(transformations, img_shape, range_size, domain_size
     return (img * 255).astype(np.uint8)
 
 # --- Public API Functions ---
-def fractal_compress(img, range_size=8, domain_size=16, show_progress=False):
+def fractal_compress(img, range_size=8, domain_size=16, show_progress=False, distortion_threshold=0.005, max_dfs_visits=500):
     """
     Compresses a grayscale image using fractal encoding.
     This is a wrapper around the original fractal_encode function.
@@ -100,7 +119,7 @@ def fractal_compress(img, range_size=8, domain_size=16, show_progress=False):
         img_gray = img
 
     # The 'compressed' data is the list of transformation parameters
-    transformations = _fractal_encode_internal(img_gray, range_size, domain_size, show_progress)
+    transformations = _fractal_encode_internal(img_gray, range_size, domain_size, show_progress, distortion_threshold, max_dfs_visits)
     
     # We also need the original image shape for decoding
     return transformations, img_gray.shape
