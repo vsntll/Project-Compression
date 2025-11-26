@@ -137,7 +137,7 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
     # The remaining CPU cores will work on CPU-based compression in parallel.
     max_workers = os.cpu_count()
     # Set a hard cap on concurrent GPU processes to control utilization. '2' is a good starting point.
-    NUM_GPU_WORKERS = min(2, max_workers - 1 if max_workers > 1 else 1) # Ensure at least 1 CPU worker if possible
+    NUM_GPU_WORKERS = min(4, max_workers - 1 if max_workers > 1 else 1) # Ensure at least 1 CPU worker if possible
     num_cpu_workers = max_workers - NUM_GPU_WORKERS
 
     print(f"Allocating {NUM_GPU_WORKERS} worker(s) for GPU tasks and {num_cpu_workers} for CPU tasks to keep GPU utilization below 100%.")
@@ -165,6 +165,10 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
             print(f"Error: Input directory not found at '{dataset_path}'. Skipping.")
             continue
 
+        # --- Sort tasks by size to prioritize larger images for GPU workers ---
+        print(f"Sorting {len(tasks)} tasks for {dataset_name} by image size...")
+        tasks.sort(key=lambda task: os.path.getsize(task[0]), reverse=True)
+
         # --- Dynamic Task Execution for the current dataset ---
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Create iterators for task arguments and available worker IDs
@@ -173,6 +177,10 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
             # Map to track which future is running on which worker (and its type)
             # Values will be tuples: (worker_id, 'gpu') or (worker_id, 'cpu')
             future_to_worker = {}
+            # New map to track the task arguments for each future, enabling task re-submission
+            future_to_task_args = {}
+            # Keep a reference to CPU futures to check for potential tasks to steal
+            cpu_futures = set()
 
             # --- Initial task submission to fill all workers ---
             # Prioritize GPU workers first
@@ -180,6 +188,7 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
                 try:
                     task_args = next(task_iterator)
                     future = executor.submit(process_image_gpu_task, (*task_args, worker_id))
+                    future_to_task_args[future] = task_args
                     future_to_worker[future] = (worker_id, 'gpu')
                 except StopIteration:
                     break # No more tasks
@@ -190,37 +199,63 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
                     task_args = next(task_iterator)
                     # Offset CPU worker IDs to avoid progress bar collision
                     future = executor.submit(process_image_cpu_task, (*task_args, worker_id + NUM_GPU_WORKERS))
+                    future_to_task_args[future] = task_args
+                    cpu_futures.add(future)
                     future_to_worker[future] = (worker_id, 'cpu')
                 except StopIteration:
                     break # No more tasks
 
             # Progress bar for images within the current dataset
             image_pbar = tqdm(total=len(tasks), desc=f"Images in {dataset_name}", unit="image", position=1, leave=False)
-            
+
             # --- Process tasks as they complete and submit new ones ---
-            for future in as_completed(future_to_worker):
+            # as_completed() works on a snapshot. We need a loop that continues as long
+            # as there are active futures.
+            while future_to_worker:
+                # Wait for the next future to complete
+                done_future = next(as_completed(future_to_worker.keys()))
+
                 image_pbar.update(1)
                 try:
-                    metrics = future.result()
+                    metrics = done_future.result()
                     collected_metrics.append(metrics)
                 except Exception as exc:
                     print(f'Task generated an exception: {exc}')
 
                 # A worker has finished. Get its ID and type.
-                worker_id, worker_type = future_to_worker.pop(future)
+                # Also remove the completed task from our tracking maps.
+                worker_id, worker_type = future_to_worker.pop(done_future)
+                future_to_task_args.pop(done_future)
+                if done_future in cpu_futures:
+                    cpu_futures.remove(done_future)
 
                 # Try to submit a new task to the now-free worker
                 try:
+                    # --- STAGE 1: Get a new task from the main iterator ---
                     task_args = next(task_iterator)
                     if worker_type == 'gpu':
                         new_future = executor.submit(process_image_gpu_task, (*task_args, worker_id))
-                        future_to_worker[new_future] = (worker_id, 'gpu')
                     else: # worker_type == 'cpu'
                         new_future = executor.submit(process_image_cpu_task, (*task_args, worker_id + NUM_GPU_WORKERS))
-                        future_to_worker[new_future] = (worker_id, 'cpu')
+                        cpu_futures.add(new_future)
+                    # Add the new task to our tracking dictionary
+                    future_to_task_args[new_future] = task_args
+                    future_to_worker[new_future] = (worker_id, worker_type)
                 except StopIteration:
-                    # No more tasks left to submit
-                    pass
+                    # --- STAGE 2: No new tasks. A GPU can now steal from a CPU. ---
+                    if worker_type == 'gpu' and cpu_futures:
+                        # Find a CPU task to steal
+                        cpu_future_to_steal = cpu_futures.pop()
+                        
+                        # Cancel the CPU task. This may not stop it if it's already running, but it prevents it from starting.
+                        cpu_future_to_steal.cancel()
+                        stolen_task_args = future_to_task_args.pop(cpu_future_to_steal)
+                        future_to_worker.pop(cpu_future_to_steal)
+                        print(f"\nGPU worker {worker_id} is stealing task for image {os.path.basename(stolen_task_args[0])} from a CPU worker.")
+                        # Submit the stolen task to the GPU
+                        new_future = executor.submit(process_image_gpu_task, (*stolen_task_args, worker_id))
+                        future_to_worker[new_future] = (worker_id, 'gpu')
+                        future_to_task_args[new_future] = stolen_task_args
 
     # --- Save Metrics to CSV ---
     # Sort by dataset and image name for consistent output
