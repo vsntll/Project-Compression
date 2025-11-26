@@ -19,15 +19,15 @@ def process_image_task(args):
     A self-contained function to process a single image.
     This function is designed to be run in a separate process.
     """
-    image_path, dataset_name, dataset_output_dir = args
+    image_path, dataset_name, dataset_output_dir, worker_id = args
     image_name = os.path.basename(image_path)
 
     # 1. Read the image
     img_color = cv2.imread(image_path)
     img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
 
-    # 2. Compress the image (disable inner progress bar for parallel execution)
-    compressed_data = fractal_compress(img_color, show_progress=False)
+    # 2. Compress the image, passing the worker_id as the position for the progress bar
+    compressed_data = fractal_compress(img_color, show_progress=True, position=worker_id)
 
     # 3. Save compressed data to measure file size
     fractal_file_path = os.path.join(dataset_output_dir, f"{os.path.splitext(image_name)[0]}_fractal.pkl")
@@ -82,7 +82,7 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
 
             for image_name in image_files:
                 image_path = os.path.join(dataset_path, image_name)
-                tasks.append((image_path, dataset_name, dataset_output_dir))
+                tasks.append((image_path, dataset_name, dataset_output_dir)) # worker_id will be added later
 
         except FileNotFoundError:
             print(f"Error: Input directory not found at '{dataset_path}'. Skipping.")
@@ -90,16 +90,20 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
 
     # --- Execute tasks in parallel ---
     print(f"\nStarting parallel processing of {len(tasks)} images...")
-    with ProcessPoolExecutor() as executor:
-        # Use as_completed to show progress as tasks finish
-        future_to_task = {executor.submit(process_image_task, task): task for task in tasks}
-        
-        # Create a tqdm instance to manually update the postfix
-        pbar = tqdm(as_completed(future_to_task), total=len(tasks), desc="Processing Images", unit="image")
-        for future in pbar:
-            task_args = future_to_task[future]
-            image_name = os.path.basename(task_args[0])
-            pbar.set_postfix_str(f"Last completed: {image_name}", refresh=True)
+    # Let the executor decide the number of workers (usually os.cpu_count())
+    max_workers = os.cpu_count()
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Assign a worker_id to each task argument tuple
+        # The position will be from 1 to max_workers, leaving position 0 for the main bar
+        tasks_with_ids = [(*task, (i % max_workers) + 1) for i, task in enumerate(tasks)]
+
+        # Main progress bar showing overall image completion
+        pbar = tqdm(total=len(tasks), desc="Overall Progress", unit="image", position=0)
+
+        # Submit tasks and collect results as they complete
+        futures = [executor.submit(process_image_task, task) for task in tasks_with_ids]
+        for future in as_completed(futures):
+            pbar.update(1)
             try:
                 metrics = future.result()
                 collected_metrics.append(metrics)
@@ -107,6 +111,8 @@ def run_fractal_structured_test(data_dirs, output_csv_name):
                 print(f'Task generated an exception: {exc}')
 
     # --- Save Metrics to CSV ---
+    # Sort by dataset and image name for consistent output
+    collected_metrics.sort(key=lambda m: (m['dataset'], m['image']))
     df = pd.DataFrame(collected_metrics)
     csv_output_path = os.path.join(metrics_dir, "fractal_structured_dfs_parallel.csv")
     df.to_csv(csv_output_path, index=False)
