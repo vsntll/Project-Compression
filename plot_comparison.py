@@ -1,10 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
-
-def plot_rd_curves(fractal_csv, wavelet_csv, output_dir):
+def plot_rd_curves(fractal_csv, wavelet_csv, output_dir, metrics):
     """
-    Generates and saves Rate-Distortion (PSNR vs. Bitrate) plots
+    Generates and saves Rate-Distortion (PSNR or SSIM vs. Bitrate) plots
     to compare fractal and wavelet compression performance.
     """
     try:
@@ -17,46 +16,44 @@ def plot_rd_curves(fractal_csv, wavelet_csv, output_dir):
         print("Please run 'python main.py' and 'python wavelet_test.py' first to generate the CSV files.")
         return
 
-    # Rename columns for clarity and consistency before merging/plotting
-    df_fractal = df_fractal.rename(columns={
-        'bitrate_fractal': 'bitrate',
-        'psnr_fractal': 'psnr'
-    })
-
     os.makedirs(output_dir, exist_ok=True)
     print(f"Plots will be saved to: {output_dir}")
 
     # Get the unique datasets from both files
     datasets = pd.concat([df_fractal['dataset'], df_wavelet['dataset']]).unique()
 
-    for dataset in datasets:
-        plt.figure(figsize=(10, 7))
+    for metric in metrics:
+        print(f"\n--- Generating {metric.upper()} vs. Bitrate plots ---")
+        for dataset in datasets:
+            plt.figure(figsize=(10, 7))
 
-        # Filter data for the current dataset
-        fractal_data = df_fractal[df_fractal['dataset'] == dataset]
-        wavelet_data = df_wavelet[df_wavelet['dataset'] == dataset]
+            # Filter data for the current dataset
+            fractal_data = df_fractal[df_fractal['dataset'] == dataset]
+            wavelet_data = df_wavelet[df_wavelet['dataset'] == dataset]
 
-        # Plotting
-        plt.scatter(fractal_data['bitrate'], fractal_data['psnr'], label='Fractal', marker='o')
-        plt.scatter(wavelet_data['bitrate'], wavelet_data['psnr'], label='Wavelet', marker='x')
+            # Plotting
+            plt.scatter(fractal_data['bitrate'], fractal_data[metric], label='Fractal', marker='o')
+            plt.scatter(wavelet_data['bitrate'], wavelet_data[metric], label='Wavelet', marker='x')
 
-        # Formatting the plot
-        plt.title(f'PSNR vs. Bitrate Comparison for "{dataset}" Dataset')
-        plt.xlabel('Bitrate (bits per pixel)')
-        plt.ylabel('PSNR (dB)')
-        plt.grid(True, which='both', linestyle='--')
-        plt.legend()
+            # Formatting the plot
+            metric_name = metric.upper()
+            y_label = f'{metric_name} (dB)' if metric_name == 'PSNR' else metric_name
+            plt.title(f'{metric_name} vs. Bitrate Comparison for "{dataset}" Dataset')
+            plt.xlabel('Bitrate (bits per pixel)')
+            plt.ylabel(y_label)
+            plt.grid(True, which='both', linestyle='--')
+            plt.legend()
 
-        # Save the plot
-        plot_filename = os.path.join(output_dir, f'{dataset}_comparison.png')
-        plt.savefig(plot_filename)
-        print(f"Saved plot: {plot_filename}")
-        plt.close()
+            # Save the plot
+            plot_filename = os.path.join(output_dir, f'{dataset}_{metric}_comparison.png')
+            plt.savefig(plot_filename)
+            print(f"Saved plot: {plot_filename}")
+            plt.close()
 
 if __name__ == "__main__":
     # Assumes main.py has been run to generate fractal metrics
-    fractal_metrics_file = 'results/metrics/fractal.csv'
+    fractal_metrics_file = 'results/metrics/fractal_cuda_parallel.csv'
     wavelet_metrics_file = 'results/metrics/wavelet.csv'
     plot_output_dir = 'results/plots/'
-
-    plot_rd_curves(fractal_metrics_file, wavelet_metrics_file, plot_output_dir)
+    metrics_to_plot = ['psnr', 'ssim']
+    plot_rd_curves(fractal_metrics_file, wavelet_metrics_file, plot_output_dir, metrics=metrics_to_plot)
