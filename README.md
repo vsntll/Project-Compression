@@ -1,15 +1,15 @@
 # Project Compression
 
-A comparative analysis pipeline for classical image compression techniques: **Wavelet Transforms** vs. **Fractal Encoding**.
+A high-performance analysis pipeline for comparing classical image compression techniques: **Wavelet Transforms** vs. **CUDA-Accelerated Fractal Encoding**.
 
-This project benchmarks compression performance across standard image datasets, outputs reconstructed images, and generates comprehensive metrics (PSNR, SSIM, bitrate) for quantitative comparison.
+This project benchmarks compression performance across standard image datasets, with a highly optimized fractal encoding implementation that leverages both CPU and GPU workers in parallel. It outputs reconstructed images and generates comprehensive metrics (PSNR, SSIM, bitrate) for quantitative comparison.
 
 ## Overview
 
 Image compression is fundamental to digital media, balancing quality and file size. This project implements and compares two classical compression approaches:
 
 - **Wavelet-based compression**: Multi-resolution decomposition with quantization
-- **Fractal compression**: Self-similarity-based encoding using domain-range block matching
+- **Fractal compression**: Self-similarity-based encoding using iterative block matching, now heavily accelerated with a hybrid CPU/GPU parallel pipeline.
 
 The pipeline processes images from multiple datasets, applies both compression methods, reconstructs the images, and exports detailed performance metrics for analysis.
 
@@ -17,11 +17,15 @@ The pipeline processes images from multiple datasets, applies both compression m
 
 - Batch processing of multiple image datasets
 - Complete compression/decompression workflows for both methods
+- **CUDA-Accelerated Fractal Codec**: Core fractal compression and decompression logic is accelerated with CUDA via CuPy for massive performance gains.
+- **Hybrid CPU/GPU Parallel Processing**: For fractal encoding, the system leverages all available CPU cores and multiple GPU workers simultaneously to maximize throughput.
+- **Dynamic Task Scheduling & Work-Stealing**: A global task queue feeds all workers. Idle GPU workers can "steal" and accelerate tasks from busy CPU workers, ensuring high resource utilization and minimizing total runtime.
+- **GPU Task Prioritization**: Larger, more computationally intensive images are automatically sorted and assigned to GPU workers first.
 - Automated quality metrics calculation (PSNR, SSIM, bitrate)
-- Visual outputs: reconstructed images saved for inspection
+- Visual outputs reconstructed images saved for inspection
 - CSV export of all metrics for further analysis
 - Real-time progress tracking with `tqdm` progress bars
-- Modular architecture for easy extension
+- Modular architecture for easy extension.
 
 ## Project Structure
 
@@ -32,11 +36,14 @@ Project-Compression/
 │   ├── kodak/                 # Kodak PhotoCD test images
 │   └── standard_test/         # Standard test images (Lena, Peppers, etc.)
 ├── results/                   # Output directory
-│   ├── fractal/              # Fractal-compressed results
+│   ├── fractal_cuda_parallel/ # Fractal-compressed results from the hybrid pipeline
 │   │   ├── clic_subset/
 │   │   ├── kodak/
 │   │   └── standard_test/
-│   ├── wavelet/              # Wavelet-compressed results
+│   └── metrics/               # Performance metrics CSV
+├── src/                       # Compression codec modules
+│   ├── fractal_codec_cuda.py      # CUDA-accelerated fractal implementation
+│   ├── fractal_codec_structured.py# CPU-based fractal implementation
 │   │   ├── clic_subset/
 │   │   ├── kodak/
 │   │   └── standard_test/
@@ -44,10 +51,8 @@ Project-Compression/
 ├── src/                      # Compression codec modules
 │   ├── fractal_codec.py     # Fractal compression implementation
 │   └── wavelet_codec.py     # Wavelet compression implementation
-├── clic_downloader.py       # Script to download CLIC dataset
-├── clic_saver.py            # Script to extract CLIC images
-├── main.py                  # Main processing pipeline
-└── README.md                # This file
+├── fractal_structured_test.py # Main script for the advanced fractal pipeline
+└── README.md                  # This file
 ```
 
 ## Installation
@@ -55,11 +60,18 @@ Project-Compression/
 ### Prerequisites
 
 - Python 3.8 or higher
+- An NVIDIA GPU with CUDA Toolkit installed (version 11.x or 12.x recommended)
 - pip package manager
 
 ### Dependencies
 
-Install required packages:
+**Note on CuPy:** The CUDA-accelerated fractal codec depends on CuPy, which must be installed according to your specific CUDA Toolkit version. It is highly recommended to install it manually *before* installing the other requirements.
+
+For example, for CUDA 12.x:
+```bash
+pip install cupy-cuda12x
+```
+See the [CuPy Installation Guide](https://docs.cupy.dev/en/stable/install.html) for other versions.
 
 ```bash
 pip install -r requirements.txt
