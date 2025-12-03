@@ -1,0 +1,2 @@
+timestamp,image,image_dimensions,compression_level,fractal_preset,wavelet_psnr_db,wavelet_ssim,wavelet_bitrate_bpp,wavelet_comp_time_s,fractal_psnr_db,fractal_ssim,fractal_bitrate_bpp,fractal_comp_time_s,system_info
+2025-12-03 14:27:54,kodim05,768x512,25,fast,30.45,0.9641,3.4165,0.2026,20.77,0.4888,6.5289,87.6544,Windows 11; CPU Cores: 20

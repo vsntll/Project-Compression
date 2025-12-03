@@ -1,6 +1,7 @@
 import numpy as np
 import pickle
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 def get_isometries():
     """Returns a list of 8 functions for block isometries."""
@@ -91,6 +92,73 @@ def fractal_compress(img_color, range_size=8, domain_size=16, show_progress=True
             
     return transformations
 
+def _compress_chunk(args):
+    """Helper function to compress a single image chunk in a separate process."""
+    img_chunk, range_size, domain_size, distortion_threshold, isometries, domain_blocks_by_class, pbar_pos = args
+    
+    height, width = img_chunk.shape
+    transformations = []
+
+    range_blocks_coords = [(i, j) for i in range(0, height, range_size) for j in range(0, width, range_size)]
+    
+    pbar = tqdm(range_blocks_coords, desc=f"CPU Worker {pbar_pos}", unit="block", position=pbar_pos, leave=False)
+
+    for i, j in pbar:
+        range_block = img_chunk[i:i+range_size, j:j+range_size]
+        min_err = float('inf')
+        best_params = None
+
+        range_block_class = classify_block(range_block)
+
+        for di, dj, domain_block in domain_blocks_by_class[range_block_class]:
+            domain_ds = downsample_block(domain_block, factor=domain_size//range_size)
+
+            for iso_idx, isometry in enumerate(isometries):
+                candidate = isometry(domain_ds)
+                
+                x = candidate.flatten()
+                y = range_block.flatten()
+                var_x = np.var(x)
+                if var_x < 1e-6: continue
+
+                a = np.cov(x, y)[0, 1] / var_x
+                b = np.mean(y) - a * np.mean(x)
+
+                pred = a * candidate + b
+                err = np.mean((range_block - pred)**2)
+
+                if err < min_err:
+                    min_err = err
+                    best_params = (i, j, di, dj, a, b, iso_idx)
+            
+            if min_err < distortion_threshold:
+                break
+        
+        if best_params:
+            transformations.append(best_params)
+            
+    return transformations
+
+def fractal_compress_parallel(img_color, range_size=8, domain_size=16, show_progress=True, distortion_threshold=0.01):
+    """
+    Compresses a color image using a structured fractal algorithm in parallel on the CPU.
+    """
+    img = np.dot(img_color[...,:3], [0.2989, 0.5870, 0.1140])
+    height, width = img.shape
+    img = img.astype(np.float32) / 255.0
+    
+    isometries = get_isometries()
+    domain_blocks_by_class = {i: [] for i in range(3)}
+    step = range_size // 2
+    for di in range(0, height - domain_size + 1, step):
+        for dj in range(0, width - domain_size + 1, step):
+            domain_block = img[di:di+domain_size, dj:dj+domain_size]
+            block_class = classify_block(domain_block)
+            domain_blocks_by_class[block_class].append((di, dj, domain_block))
+
+    # This will be the new parallel implementation. For now, it calls the original.
+    # We will replace this with a ProcessPoolExecutor implementation.
+    return fractal_compress(img_color, range_size, domain_size, show_progress, 0, distortion_threshold)
 def fractal_decompress(transformations, img_shape, range_size=8, domain_size=16, iterations=10):
     """Decompresses an image from a set of fractal transformations."""
     height, width = img_shape[:2] # Handle color or grayscale shape
