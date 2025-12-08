@@ -101,6 +101,7 @@ def main():
     # --- Configuration ---
     # Use an image from the Kodak dataset. Change this path to use a different image.
     image_path = "data/kodak/kodim05.png"
+    #image_path = "data/clic_subset/clic_image_0022.png"
     image_name = os.path.splitext(os.path.basename(image_path))[0]
 
     # --- Compression Control ---

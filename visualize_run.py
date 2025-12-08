@@ -129,7 +129,7 @@ def main(run_dir):
         cv2.putText(frame_color, title, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         titled_frames.append(frame_color)
 
-    iio.mimsave(fractal_steps_path, titled_frames, duration=3, loop=0)
+    iio.mimsave(fractal_steps_path, titled_frames, duration=3.0, loop=0)
     print(f"Saved fractal steps GIF to: {fractal_steps_path}")
 
     # --- 4. Generate Wavelet Decompression GIF ---
@@ -150,7 +150,7 @@ def main(run_dir):
         cv2.putText(frame_color, title, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
         titled_frames.append(frame_color)
 
-    iio.mimsave(wavelet_steps_path, titled_frames, duration=3, loop=0)
+    iio.mimsave(wavelet_steps_path, titled_frames, duration=3.0, loop=0)
     print(f"Saved wavelet steps GIF to: {wavelet_steps_path}")
 
 

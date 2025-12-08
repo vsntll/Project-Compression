@@ -1,2 +1,5 @@
 timestamp,image,image_dimensions,compression_level,fractal_preset,wavelet_psnr_db,wavelet_ssim,wavelet_bitrate_bpp,wavelet_comp_time_s,fractal_psnr_db,fractal_ssim,fractal_bitrate_bpp,fractal_comp_time_s,system_info
 2025-12-03 14:27:54,kodim05,768x512,25,fast,30.45,0.9641,3.4165,0.2026,20.77,0.4888,6.5289,87.6544,Windows 11; CPU Cores: 20
+2025-12-03 14:52:19,kodim05,768x512,25,fast,30.45,0.9641,3.4165,0.0712,20.77,0.4888,6.5289,57.2633,Windows 11; CPU Cores: 20
+2025-12-03 15:24:51,kodim05,768x512,25,fast,30.45,0.9641,3.4165,0.1114,20.77,0.4888,6.5289,59.3596,Windows 11; CPU Cores: 20
+2025-12-03 16:42:59,kodim05,768x512,25,fast,30.45,0.9641,3.4165,0.0850,20.77,0.4888,6.5289,52.0655,Windows 11; CPU Cores: 20
