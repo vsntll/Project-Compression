@@ -126,44 +126,39 @@ data_dirs = {
 }
 ```
 
-### Downloading CLIC Dataset
-
-```bash
-# Download CLIC dataset from TensorFlow Datasets
-python clic_downloader.py
-
-# Extract images to data/clic_subset/
-python clic_saver.py
-```
-
 ## 📈 Output Files
 
 ### Reconstructed Images
 
 Decompressed images are saved for visual quality inspection:
 
-- **Wavelet**: `results/wavelet/<dataset>/<image_name>_wavelet.png`
-- **Fractal**: `results/fractal/<dataset>/<image_name>_fractal.png`
+- **Wavelet**: `results/wavelet/<dataset_name>/<image_name>_wavelet.png`
+- **Fractal**: `results/fractal/<dataset_name>/<image_name>_fractal.png`
 
-### Compressed Representations
+### Analysis and Metrics
 
-- **Wavelet**: `.npz` files containing quantized wavelet coefficients
-- **Fractal**: `.pkl` files containing transformation parameters
+The `results/` directory contains all quantitative outputs:
 
-### Metrics CSV
+- **Raw Metrics**: Separate CSV files for each method are stored in `results/metrics/`.
+  - `wavelet.csv`
+  - `fractal_cuda_parallel.csv`
+  - Each file contains `dataset`, `image`, `psnr`, `ssim`, and `bitrate`.
 
-`results/metrics/compression_comparison_metrics.csv` contains:
+- **Performance Summary**: `results/performance_summary.csv` provides a high-level overview.
 
 | Column | Description |
 |--------|-------------|
-| `dataset` | Dataset name (kodak, standard_test, clic_subset) |
-| `image` | Image filename |
-| `psnr_wavelet` | Peak Signal-to-Noise Ratio for wavelet method (dB) |
-| `ssim_wavelet` | Structural Similarity Index for wavelet method (0-1) |
-| `bitrate_wavelet` | Bits per pixel for wavelet compression |
-| `psnr_fractal` | Peak Signal-to-Noise Ratio for fractal method (dB) |
-| `ssim_fractal` | Structural Similarity Index for fractal method (0-1) |
-| `bitrate_fractal` | Bits per pixel for fractal compression |
+| `dataset` | Name of the source dataset. |
+| `image` | Original image filename. |
+| `psnr_winner` | Method with the higher PSNR. |
+| `ssim_winner` | Method with the higher SSIM. |
+| `bitrate_winner` | Method with the lower bitrate. |
+| `filesize_winner` | Method with the smaller file size. |
+
+- **Comparison Plots**: Visualizations are saved in `results/detailed_plots/`.
+  - `[dataset]_[metric]_vs_bitrate.png`: PSNR/SSIM vs. bitrate scatter plots.
+  - `[dataset]_[metric]_vs_filesize.png`: PSNR/SSIM vs. file size scatter plots.
+  - `[image]_metrics_comparison.png`: Bar chart comparing all metrics for a single image.
 
 ## Metrics Explained
 
